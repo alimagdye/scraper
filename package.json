@@ -1,0 +1,37 @@
+{
+  "name": "scraper",
+  "version": "1.0.0",
+  "description": "Polite scraping pipeline: it downloads the first three catalogue pages of Books to Scrape, visits all 60 book pages, turns messy HTML into clean, checked JSON records, survives a broken page without crashing, and ends every run with a short report of what happened.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/alimagdye/scraper.git"
+  },
+  "keywords": [
+    "Scraper",
+    "Polite Scraper",
+    "Web Scraper",
+    "Node.js",
+    "Cheerio",
+    "Axios"
+  ],
+  "author": "Ali Magdy",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/alimagdye/scraper/issues"
+  },
+  "homepage": "https://github.com/alimagdye/scraper#readme",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2"
+  }
+}
