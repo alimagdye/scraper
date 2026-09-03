@@ -272,13 +272,6 @@ export async function scrapeBooks(): Promise<RawBook[]> {
     ...new Map(discoveredBooks.map((book) => [book.productUrl, book])).values(),
   ];
 
-  // Stage 5 failure test
-  uniqueBooks.push({
-    productUrl:
-      "https://books.toscrape.com/catalogue/this-book-does-not-exist/index.html",
-    sourcePage: START_URL,
-  });
-
   const rawBooks: RawBook[] = [];
 
   // Fetch and extract all detail pages
