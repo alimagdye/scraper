@@ -20,6 +20,28 @@ interface DiscoveredBook {
   sourcePage: string;
 }
 
+export interface ScraperStats {
+  pagesFetched: number;
+  cacheHits: number;
+  failedPages: number;
+}
+
+const stats: ScraperStats = {
+  pagesFetched: 0,
+  cacheHits: 0,
+  failedPages: 0,
+};
+
+export function getScraperStats(): ScraperStats {
+  return { ...stats };
+}
+
+function resetStats(): void {
+  stats.pagesFetched = 0;
+  stats.cacheHits = 0;
+  stats.failedPages = 0;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -44,6 +66,8 @@ async function fetchPage(
   if (existsSync(cacheFile)) {
     const html = readFileSync(cacheFile, "utf-8");
 
+    stats.cacheHits++;
+
     console.log(`CACHE HIT (${html.length} bytes)`);
 
     return {
@@ -56,44 +80,87 @@ async function fetchPage(
     mkdirSync(CACHE_DIR, { recursive: true });
   }
 
-  // Wait only before real requests
-  await sleep(REQUEST_DELAY_MS);
+  const maxAttempts = 2;
 
-  console.log(`FETCH ${url}`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await sleep(REQUEST_DELAY_MS);
 
-  const controller = new AbortController();
+    console.log(`FETCH ${url}`);
 
-  const timeout = setTimeout(() => {
-    controller.abort();
-  }, TIMEOUT_MS);
+    const controller = new AbortController();
 
-  try {
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": USER_AGENT,
-      },
-      signal: controller.signal,
-    });
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, TIMEOUT_MS);
 
-    if (response.status !== 200) {
-      throw new Error(
-        `Fetch failed: ${response.status} ${response.statusText}`,
-      );
+    try {
+      const response = await fetch(url, {
+        headers: {
+          "User-Agent": USER_AGENT,
+        },
+        signal: controller.signal,
+      });
+
+      // Never retry 404 or 403
+      if (response.status === 404 || response.status === 403) {
+        throw new Error(
+          `Fetch failed: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      // Retry server errors once
+      if (response.status >= 500 && response.status < 600) {
+        if (attempt < maxAttempts) {
+          console.log(`Server error (${response.status}), retrying once...`);
+
+          continue;
+        }
+
+        throw new Error(
+          `Fetch failed: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      if (response.status !== 200) {
+        throw new Error(
+          `Fetch failed: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const html = await response.text();
+
+      writeFileSync(cacheFile, html, "utf-8");
+
+      stats.pagesFetched++;
+
+      console.log(`FETCHED (${html.length} bytes)`);
+
+      return {
+        html,
+        fetchedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      const isLastAttempt = attempt === maxAttempts;
+
+      // Don't retry 403 / 404 errors
+      if (
+        error instanceof Error &&
+        (error.message.includes("403") || error.message.includes("404"))
+      ) {
+        throw error;
+      }
+
+      if (isLastAttempt) {
+        throw error;
+      }
+
+      console.log("Request failed, retrying once...");
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const html = await response.text();
-
-    writeFileSync(cacheFile, html, "utf-8");
-
-    console.log(`FETCHED (${html.length} bytes)`);
-
-    return {
-      html,
-      fetchedAt: new Date().toISOString(),
-    };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  throw new Error(`Failed to fetch ${url}`);
 }
 
 function discoverBooks(html: string, pageUrl: string): DiscoveredBook[] {
@@ -176,6 +243,8 @@ function extractRawBook(
 }
 
 export async function scrapeBooks(): Promise<RawBook[]> {
+  resetStats();
+
   let currentUrl = START_URL;
   let cataloguePages = 0;
 
@@ -203,17 +272,33 @@ export async function scrapeBooks(): Promise<RawBook[]> {
     ...new Map(discoveredBooks.map((book) => [book.productUrl, book])).values(),
   ];
 
+  // Stage 5 failure test
+  uniqueBooks.push({
+    productUrl:
+      "https://books.toscrape.com/catalogue/this-book-does-not-exist/index.html",
+    sourcePage: START_URL,
+  });
+
   const rawBooks: RawBook[] = [];
 
   // Fetch and extract all detail pages
   for (const book of uniqueBooks) {
-    const cacheFile = getDetailCacheFile(book.productUrl);
+    try {
+      const cacheFile = getDetailCacheFile(book.productUrl);
 
-    const { html, fetchedAt } = await fetchPage(book.productUrl, cacheFile);
+      const { html, fetchedAt } = await fetchPage(book.productUrl, cacheFile);
 
-    const rawBook = extractRawBook(html, book, fetchedAt);
+      const rawBook = extractRawBook(html, book, fetchedAt);
 
-    rawBooks.push(rawBook);
+      rawBooks.push(rawBook);
+    } catch (error) {
+      stats.failedPages++;
+
+      console.error(
+        `FAILED ${book.productUrl}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   return rawBooks;
